@@ -15,7 +15,6 @@ const DropCard = ({ drop, onBoost, onSearch, handleSiphon, setSelectedUserId }) 
   const hasLongDesc = drop.description && drop.description.length > 50;
 
   const handleShare = async () => {
-    // קישור ייחודי עם השם Dop
     const dropUrl = `${window.location.origin}/?drop=${drop.id}`;
     const shareData = { 
       title: 'Dop', 
@@ -45,11 +44,11 @@ const DropCard = ({ drop, onBoost, onSearch, handleSiphon, setSelectedUserId }) 
         <video src={drop.video_url} autoPlay loop muted playsInline className="absolute inset-0 w-full h-full object-cover" />
       )}
 
-      {/* הדרגתיות רקע */}
+      {/* הדרגתיות רקע שחור לקריאות טקסט */}
       <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
       <div className="absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-none" />
 
-      {/* קופת פרס */}
+      {/* קופת פרס - תמיד בזהב */}
       {drop.bounty_pool > 0 && (
         <div className="absolute top-20 left-4 z-30 bg-yellow-500/20 border border-yellow-500/50 rounded-full px-4 py-1.5 flex items-center gap-2 backdrop-blur-md shadow-[0_0_15px_rgba(234,179,8,0.3)] animate-pulse">
           <CircleDollarSign size={16} className="text-yellow-400" />
@@ -63,8 +62,9 @@ const DropCard = ({ drop, onBoost, onSearch, handleSiphon, setSelectedUserId }) 
           className="flex items-center cursor-pointer active:scale-95 transition-all w-fit"
           onClick={(e) => { e.stopPropagation(); setSelectedUserId && setSelectedUserId(drop.user_id); }}
         >
-          <h3 className={`font-black text-xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] flex items-center gap-2 text-yellow-400 text-right`}>
-            {hasHalo && <Crown size={20} className="text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,1)]" />}
+          {/* שם המשתמש הוקטן לגודל סטנדרטי (text-base) וכתר קטן יותר (16) */}
+          <h3 className="font-black text-base drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] flex items-center gap-1.5 text-white text-right">
+            {hasHalo && <Crown size={16} className="text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.8)]" />}
             @{drop.users?.username || 'אנונימי'}
           </h3>
         </div>
@@ -109,8 +109,8 @@ const DropCard = ({ drop, onBoost, onSearch, handleSiphon, setSelectedUserId }) 
             </button>
 
             {handleSiphon && (
-              <button onClick={(e) => { e.stopPropagation(); handleSiphon(); setShowActions(false); }} className="group relative w-11 h-11 bg-black/60 border border-orange-500/40 backdrop-blur-xl rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(249,115,22,0.3)] active:scale-90 transition-all">
-                <Ghost size={20} className="text-orange-400 drop-shadow-[0_0_8px_rgba(249,115,22,0.8)]" />
+              <button onClick={(e) => { e.stopPropagation(); handleSiphon(); setShowActions(false); }} className="group relative w-11 h-11 bg-black/60 border border-red-500/40 backdrop-blur-xl rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(239,68,68,0.3)] active:scale-90 transition-all">
+                <Ghost size={20} className="text-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
               </button>
             )}
 

@@ -1,11 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="neonBlue" x1="0" x2="0" y1="1" y2="0">
-      <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.4"/>
-      <stop offset="40%" stop-color="#000000" stop-opacity="0"/>
+    <linearGradient id="bottomGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="85%" style="stop-color:#0A0A0A;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:0.4" />
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="115" fill="#000000"/>
-  <rect width="512" height="512" rx="115" fill="url(#neonBlue)"/>
-  <text x="50%" y="50%" font-family="system-ui, sans-serif" font-weight="900" font-size="160" fill="#ffffff" text-anchor="middle" dominant-baseline="central" letter-spacing="8">DOP</text>
+  
+  <rect x="0" y="0" width="512" height="512" rx="120" ry="120" fill="url(#bottomGlow)" />
+  
+  <g transform="translate(256, 256) scale(1.1, 1)" font-family="sans-serif" font-weight="900" font-size="165" dominant-baseline="central" text-anchor="middle">
+    
+    <text x="-150" y="5" fill="#FFFFFF" style="letter-spacing: -2px;">D</text>
+    
+    <g transform="translate(0, 0)">
+      <circle cx="0" cy="0" r="58" fill="none" stroke="#FFFFFF" stroke-width="22" />
+      <path d="M -45 0 L -25 0 L -12 -35 L 5 45 L 18 -18 L 28 0 L 45 0" 
+            fill="none" 
+            stroke="#10b981" 
+            stroke-width="12" 
+            stroke-linejoin="round" 
+            stroke-linecap="round" />
+    </g>
+    
+    <text x="150" y="5" fill="#FFFFFF" style="letter-spacing: -2px;">P</text>
+  </g>
 </svg>

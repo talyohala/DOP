@@ -1,75 +1,57 @@
 import React, { useState, useEffect } from 'react';
+import { Bell, X, Zap, Ghost, CircleDollarSign, UserPlus, CheckCircle2, Loader2 } from 'lucide-react';
 import { supabase } from '../supabase';
-import { Bell, ArrowRight, Zap, Crown, CircleDollarSign, CheckCircle2 } from 'lucide-react';
 
 const NotificationsScreen = ({ userId, onClose }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (userId) fetchNotifs();
-  }, [userId]);
+  useEffect(() => { if (userId) fetchNotifications(); }, [userId]);
 
-  const fetchNotifs = async () => {
+  const fetchNotifications = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('dop_notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-    if (data) setNotifications(data);
+    const { data, error } = await supabase.from('dop_notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50);
+    if (!error && data) setNotifications(data);
     setLoading(false);
   };
 
-  const markAsRead = async (id) => {
-    await supabase.from('dop_notifications').update({ is_read: true }).eq('id', id);
-    setNotifications(notifications.map(n => n.id === id ? { ...n, is_read: true } : n));
-  };
-
   const getIcon = (type) => {
-    switch(type) {
-      case 'boost': return <Zap size={20} className="text-blue-400" />;
-      case 'coin': return <CircleDollarSign size={20} className="text-yellow-400" />;
-      case 'system': return <Crown size={20} className="text-purple-400" />;
+    switch (type) {
+      case 'boost': return <Zap size={20} className="text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]" />;
+      case 'attack': return <Ghost size={20} className="text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]" />;
+      case 'coin': return <CircleDollarSign size={20} className="text-yellow-400 drop-shadow-[0_0_5px_rgba(250,204,21,0.5)]" />;
+      case 'follow': return <UserPlus size={20} className="text-emerald-400" />;
       default: return <Bell size={20} className="text-gray-400" />;
     }
   };
 
+  const formatTime = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + ' | ' + date.toLocaleDateString('he-IL');
+  };
+
   return (
-    <div className="fixed inset-0 bg-[#0a0a0a] z-[100] flex flex-col font-sans text-white animate-in slide-in-from-right duration-300" dir="rtl">
-      <div className="pt-12 pb-4 px-6 border-b border-white/10 flex justify-between items-center bg-black/50 backdrop-blur-md shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Bell size={24} className="text-white" />
-            {notifications.some(n => !n.is_read) && (
-              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-black"></span>
-            )}
-          </div>
-          <h2 className="text-2xl font-black text-white tracking-widest uppercase">התראות</h2>
-        </div>
-        <button onClick={onClose} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-full transition-all active:scale-95"><ArrowRight size={20}/></button>
+    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col font-sans text-white animate-in slide-in-from-bottom duration-300" dir="rtl">
+      <div className="pt-12 pb-4 px-6 border-b border-white/10 bg-black/50 shrink-0 flex justify-between items-center relative z-20">
+        <h2 className="text-2xl font-black text-white tracking-widest uppercase flex items-center gap-2"><Bell className="text-emerald-500" size={24} /> התראות</h2>
+        <button onClick={onClose} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-full transition-all active:scale-95"><X size={20}/></button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-28">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-32">
         {loading ? (
-          <div className="flex justify-center mt-10"><div className="w-8 h-8 border-4 border-white/10 border-t-blue-500 rounded-full animate-spin"></div></div>
+          <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-emerald-500" size={32} /></div>
         ) : notifications.length === 0 ? (
-          <div className="text-center mt-20 flex flex-col items-center opacity-50">
-            <Bell size={48} className="mb-4 text-white/20" />
-            <p className="font-bold tracking-widest uppercase">אין לך התראות כרגע</p>
-          </div>
+          <div className="text-center py-20 text-gray-500 font-bold flex flex-col items-center gap-3"><CheckCircle2 size={48} className="text-white/5" /> הכל שקט כאן... אין התראות חדשות</div>
         ) : (
-          notifications.map(n => (
-            <div key={n.id} onClick={() => !n.is_read && markAsRead(n.id)} className={`relative flex items-center gap-4 p-4 rounded-[1.5rem] border transition-all cursor-pointer overflow-hidden ${n.is_read ? 'bg-white/5 border-white/5 opacity-70' : 'bg-zinc-900/80 border-white/10 shadow-lg'}`}>
-              {!n.is_read && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>}
-              <div className="w-12 h-12 rounded-full bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
-                {getIcon(n.type)}
+          notifications.map((notif) => (
+            <div key={notif.id} className="flex items-start gap-4 p-4 bg-zinc-900/50 rounded-2xl border border-white/5 backdrop-blur-sm transition-all active:scale-[0.98]">
+              <div className={`w-12 h-12 rounded-full border flex items-center justify-center shrink-0 shadow-lg ${notif.type === 'attack' ? 'bg-red-500/10 border-red-500/30' : notif.type === 'coin' ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-emerald-500/10 border-emerald-500/30'}`}>
+                {getIcon(notif.type)}
               </div>
-              <div className="flex-1">
-                <p className={`text-sm ${n.is_read ? 'text-gray-400' : 'text-white font-bold'}`}>{n.content}</p>
-                <p className="text-[10px] text-gray-500 font-mono mt-1">{new Date(n.created_at).toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit'})}</p>
+              <div className="flex-1 pt-1">
+                <p className="text-sm text-white font-bold leading-snug">{notif.content}</p>
+                <span className="text-[10px] text-gray-500 font-bold mt-2 block tracking-wider uppercase">{formatTime(notif.created_at)}</span>
               </div>
-              {!n.is_read && <CheckCircle2 size={16} className="text-blue-500 shrink-0" />}
             </div>
           ))
         )}
