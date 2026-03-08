@@ -1,0 +1,378 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Clock, Zap, Skull, Heart, Flame, User, MessageCircle, X, Send, Bell, Search, Share2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import { sounds } from '../utils/sounds';
+
+const FeedItem = ({ video, isActive, user, profile, fetchProfile, onNavigateTrending, onNavigateProfile, onNavigateSearch }: any) => {
+  const navigate = useNavigate();
+  const [timeRemaining, setTimeRemaining] = useState<string>('');
+  const [isDead, setIsDead] = useState(false);
+  const [showRadar, setShowRadar] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState<any[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const prevBoosts = useRef(video.total_boosts);
+  const commentsEndRef = useRef<HTMLDivElement>(null);
+  let lastTap = useRef(0);
+
+  const earnedMinutes = video.total_boosts * 5;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const distance = new Date(video.expires_at).getTime() - new Date().getTime();
+      if (distance <= 0) {
+        clearInterval(timer);
+        setTimeRemaining('00:00:00');
+        setIsDead(true);
+        setShowComments(false);
+      } else {
+        setIsDead(false);
+        const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+        setTimeRemaining(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+        
+        if (isActive && distance <= 10000) sounds.playTick();
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [video.expires_at, isActive]);
+
+  useEffect(() => {
+    if (video.total_boosts > prevBoosts.current && prevBoosts.current !== 0) {
+      setShowRadar(true);
+      if (navigator.vibrate && isActive) navigator.vibrate(50);
+      setTimeout(() => setShowRadar(false), 2000);
+    }
+    prevBoosts.current = video.total_boosts;
+  }, [video.total_boosts, isActive]);
+
+  useEffect(() => {
+    if (!showComments) return;
+    const fetchComments = async () => {
+      const { data } = await supabase.from('dop_comments').select('*, user:dop_users(display_name)').eq('video_id', video.id).order('created_at', { ascending: true });
+      if (data) setComments(data);
+    };
+    fetchComments();
+    const channel = supabase.channel(`comments_${video.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dop_comments', filter: `video_id=eq.${video.id}` }, () => fetchComments()).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [showComments, video.id]);
+
+  useEffect(() => { if (commentsEndRef.current) commentsEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [comments]);
+
+  const handleGiveTime = async () => {
+    sounds.init();
+    if (isDead || !user) return;
+    if (user.id === video.creator_id) {
+      sounds.playError();
+      return toast.error('אי אפשר להציל דרופ של עצמך! 😂', { style: { background: 'var(--color-danger)', color: '#fff' }});
+    }
+    if ((profile?.time_balance || 0) < 5) {
+      sounds.playError();
+      return toast.error('אין דקות בארנק');
+    }
+    sounds.playZap();
+    if (navigator.vibrate) navigator.vibrate([50, 50]);
+    setShowRadar(true);
+    setTimeout(() => setShowRadar(false), 2000);
+    
+    const { error } = await supabase.rpc('boost_video_time', { v_id: video.id, u_id: user.id, minutes_to_add: 5 });
+    if (!error) fetchProfile(user.id);
+  };
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 300) handleGiveTime();
+    lastTap.current = now;
+  };
+
+  // הפונקציה המטורפת החדשה: תגובה מתפוצצת!
+  const postComment = async () => {
+    if (!newComment.trim() || !user || isDead) return;
+    const tempComment = newComment;
+    setNewComment('');
+    
+    // שומר את התגובה
+    await supabase.from('dop_comments').insert([{ video_id: video.id, user_id: user.id, text: tempComment }]);
+    
+    // הוספת 30 שניות לדרופ בזכות התגובה!
+    await supabase.rpc('add_video_seconds', { v_id: video.id, seconds_to_add: 30 });
+    
+    sounds.playCoin();
+    toast.success('+30 שניות! הצלת את הדרופ 💣', { style: { background: 'var(--color-primary)', color: '#fff', fontWeight: 'bold' }});
+  };
+
+  const shareVideo = async () => {
+    const url = `https://y-mu-green.vercel.app/?v=${video.id}`;
+    const text = `🚨 הדרופ של @${video.creator?.display_name || 'יוצר'} גוסס! כנסו להציל אותו:`;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'הצילו את הדרופ!', text, url }); } catch (err) {}
+    } else {
+      navigator.clipboard.writeText(`${text} ${url}`);
+      toast.success('קישור החירום הועתק! 🚀');
+    }
+  };
+
+  const isImage = video.video_url?.match(/\.(jpeg|jpg|gif|png|webp)$/i) != null;
+  const isDanger = !isDead && timeRemaining.startsWith('00:00:') && parseInt(timeRemaining.split(':')[2]) <= 30;
+
+  return (
+    <div style={{ height: '100dvh', width: '100vw', scrollSnapAlign: 'start', position: 'relative', background: 'var(--bg-main)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '20%', background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)', zIndex: 1, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '50%', background: 'linear-gradient(to top, rgba(0,0,0,0.9), transparent)', zIndex: 1, pointerEvents: 'none' }} />
+
+      <div onClick={handleDoubleTap} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', zIndex: 0 }}>
+        {isDead ? (
+          <div style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Skull size={80} color="var(--color-danger)" opacity={0.2} /></div>
+        ) : (
+          <div style={{ width: '100%', height: '100%', maxWidth: '100vw', maxHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', aspectRatio: '9/16' }}>
+            {isImage ? (
+              <img src={video.video_url} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} alt="" />
+            ) : (
+              <video src={video.video_url} autoPlay={isActive} loop muted playsInline style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+            )}
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {showRadar && (
+          <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 20, pointerEvents: 'none' }}>
+            <Zap size={100} color="#fff" style={{ filter: 'drop-shadow(0 0 30px rgba(255,255,255,1))' }} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div style={{ position: 'absolute', top: 12, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', height: 26, zIndex: 10, pointerEvents: 'none' }}>
+        <AnimatePresence>
+          {!isDead && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={isDanger ? { opacity: [1, 0.4, 1], scale: [1, 1.05, 1], boxShadow: ['0 0 10px rgba(255,69,58,0.5)', '0 0 25px rgba(255,69,58,1)', '0 0 10px rgba(255,69,58,0.5)'] } : { opacity: 1, scale: 1, boxShadow: '0 0 10px rgba(255,69,58,0.5)' }}
+              exit={{ opacity: 0, scale: 0.8 }} transition={{ repeat: isDanger ? Infinity : 0, duration: 0.6 }} className="glass-panel" 
+              style={{ height: 26, padding: '0 10px', display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--color-danger)', borderRadius: 13, pointerEvents: 'auto' }}
+            >
+              <Clock size={12} color="var(--color-danger)" />
+              <span style={{ color: '#fff', fontSize: 13, fontWeight: 800, fontFamily: 'monospace', letterSpacing: 1, marginTop: 2 }}>{timeRemaining}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {!isDead && (
+        <div style={{ position: 'absolute', right: 12, bottom: 120, display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', zIndex: 10 }}>
+          <motion.button whileTap={{ scale: 0.9 }} onClick={onNavigateSearch} className="glass-button" style={{ width: 44, height: 44, boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}><Search size={20} color="#fff" /></motion.button>
+          
+          {/* כפתור התגובות המתפוצצות! */}
+          <motion.button whileTap={{ scale: 0.9 }} onClick={() => setShowComments(true)} className="glass-button" style={{ width: 44, height: 44, boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}><MessageCircle size={20} color="#fff" /></motion.button>
+          
+          <motion.button whileTap={{ scale: 0.9 }} onClick={onNavigateTrending} className="glass-button" style={{ width: 44, height: 44, boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}><Flame size={20} color="#fff" /></motion.button>
+          <motion.button whileTap={{ scale: 0.9 }} onClick={(e) => { e.stopPropagation(); shareVideo(); }} className="glass-button" style={{ width: 44, height: 44, boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}><Share2 size={20} color="#fff" style={{ marginLeft: -2 }} /></motion.button>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+            <motion.button whileTap={{ scale: 0.9 }} onClick={(e) => { e.stopPropagation(); handleGiveTime(); }} className="glass-button" style={{ width: 48, height: 48, background: 'rgba(255,255,255,0.15)', boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}><Zap size={22} color="#fff" fill="#fff" /></motion.button>
+            <span style={{ color: '#fff', fontWeight: 800, fontSize: 11, textShadow: '0 2px 5px rgba(0,0,0,0.8)' }}>{video.total_boosts}</span>
+          </div>
+          <AnimatePresence>
+            {isDanger && (
+              <motion.button initial={{ scale: 0 }} animate={{ scale: [1, 1.1, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} onClick={(e) => { e.stopPropagation(); handleGiveTime(); }} className="glass-button" style={{ width: 40, height: 40, borderColor: 'var(--color-warning)' }}>
+                <Heart size={20} color="var(--color-warning)" fill="var(--color-warning)" />
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* אזור המידע השמאלי עם התגית הצהובה */}
+      <div style={{ position: 'absolute', bottom: 120, left: 16, maxWidth: '75%', zIndex: 10, direction: 'rtl', textAlign: 'left' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          {earnedMinutes > 0 && (
+            <div style={{ background: 'rgba(255, 215, 0, 0.15)', border: '1px solid #FFD700', color: '#FFD700', padding: '4px 10px', borderRadius: 16, fontSize: 12, fontWeight: 900, display: 'flex', alignItems: 'center', gap: 4, textShadow: '0 1px 3px rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)' }}>
+              +{earnedMinutes} דק' <Clock size={12} />
+            </div>
+          )}
+          <span onClick={() => onNavigateProfile(video.creator_id)} style={{ fontWeight: 900, fontSize: 17, cursor: 'pointer', background: 'rgba(0,0,0,0.4)', padding: '4px 12px', borderRadius: 16, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+            @{video.creator?.display_name || 'user'}
+          </span>
+        </div>
+        <div style={{ fontSize: 14, color: '#fff', opacity: 0.95, lineHeight: 1.4, background: 'rgba(0,0,0,0.4)', padding: '8px 12px', borderRadius: 16, textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+          {video.description}
+        </div>
+      </div>
+
+      {/* התיקון לקפיצות הגלילה! עוטפים ב-stopPropagation */}
+      <AnimatePresence>
+        {showComments && !isDead && (
+          <motion.div 
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} 
+            onTouchStart={e => e.stopPropagation()} 
+            onTouchMove={e => e.stopPropagation()} 
+            onWheel={e => e.stopPropagation()}
+            style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: '65dvh', zIndex: 99999, background: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', borderRadius: '32px 32px 0 0', zIndex: 100, display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--glass-border)', direction: 'rtl' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 24px 16px', borderBottom: '1px solid var(--glass-border)' }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}><MessageCircle size={20} color="var(--color-primary)" /> כל תגובה מוסיפה 30ש!</div>
+              <button onClick={() => setShowComments(false)} className="glass-button" style={{ width: 36, height: 36, background: 'rgba(0,0,0,0.5)' }}><X size={18} /></button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {comments.length === 0 ? <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40, fontSize: 14 }}>היה הראשון להציל את הדרופ! 💣</div> : comments.map(c => (
+                <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span onClick={() => onNavigateProfile(c.user_id)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}>@{c.user?.display_name || 'user'}</span>
+                  <span style={{ fontSize: 15, color: '#fff', lineHeight: 1.4 }}>{c.text}</span>
+                </div>
+              ))}
+              <div ref={commentsEndRef} />
+            </div>
+            <div style={{ padding: '16px 24px calc(16px + env(safe-area-inset-bottom))', borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.3)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: 12, background: 'rgba(255,255,255,0.1)', borderRadius: 24, padding: 8, alignItems: 'center' }}>
+                <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && postComment()} placeholder="כתוב תגובה להצלת הדרופ..." style={{ flex: 1, background: 'transparent', border: 'none', color: '#fff', outline: 'none', padding: '0 12px', fontSize: 15 }} />
+                <button onClick={postComment} className="glass-button" style={{ width: 40, height: 40, background: 'var(--color-primary)', color: '#fff', borderRadius: '50%', border: 'none' }}><Send size={18} style={{ transform: 'translateX(-2px)' }} /></button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default function Feed() {
+  const { user, profile, fetchProfile } = useAuth();
+  const navigate = useNavigate();
+  const [videos, setVideos] = useState<any[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef<number | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const [feedType, setFeedType] = useState<'foryou' | 'following'>('foryou');
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [loopCount, setLoopCount] = useState(2);
+
+  useEffect(() => {
+    const fetchVideos = async () => {
+      const { data } = await supabase.from('dop_videos').select('*, creator:dop_users(display_name)').gt('expires_at', new Date().toISOString()).order('expires_at', { ascending: true });
+      if (data) setVideos(data);
+    };
+    fetchVideos();
+    const channel = supabase.channel('public:dop_videos').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dop_videos' }, (payload) => {
+      setVideos(prev => prev.map(v => v.id === payload.new.id ? { ...v, ...payload.new } : v));
+    }).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchFollowing = async () => {
+      const { data } = await supabase.from('dop_follows').select('following_id').eq('follower_id', user.id);
+      if (data) setFollowingIds(data.map(d => d.following_id));
+    };
+    fetchFollowing();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchNotifs = async () => {
+      const { data } = await supabase.from('dop_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
+      if (data) setNotifications(data);
+    };
+    fetchNotifs();
+
+    const notifChannel = supabase.channel(`notifs_${user.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dop_notifications', filter: `user_id=eq.${user.id}` }, (payload) => {
+      setNotifications(prev => [payload.new, ...prev]);
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      toast.success(payload.new.message, { icon: '🚨', style: { background: 'var(--color-danger)', color: '#fff' } });
+    }).subscribe();
+
+    return () => { supabase.removeChannel(notifChannel); };
+  }, [user]);
+
+  const displayedVideos = feedType === 'following' ? videos.filter(v => followingIds.includes(v.creator_id) || v.creator_id === user?.id) : videos;
+  const loopedVideos = [];
+  for (let i = 0; i < loopCount; i++) {
+    loopedVideos.push(...displayedVideos.map(v => ({ ...v, uniqueKey: `${v.id}-${i}` })));
+  }
+
+  const handleScroll = async () => {
+    if (!containerRef.current || !user) return;
+    const index = Math.round(containerRef.current.scrollTop / window.innerHeight);
+    if (index !== activeIndex) {
+      setActiveIndex(index);
+      if (index >= loopedVideos.length - 2) setLoopCount(prev => prev + 1);
+      if (Math.random() > 0.8) {
+        sounds.playCoin();
+        await supabase.rpc('reward_watch_time', { u_id: user.id, points: 5 });
+        fetchProfile(user.id);
+        toast('+5 דקות לארנק!', { icon: '🪙', style: { background: '#FFCC00', color: '#000', fontWeight: '900', fontSize: '16px' } });
+      }
+    }
+  };
+
+  const markNotifsRead = async () => {
+    setShowNotifs(!showNotifs);
+    if (!showNotifs && unreadCount > 0) {
+      await supabase.from('dop_notifications').update({ is_read: true }).eq('user_id', user?.id).eq('is_read', false);
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    }
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const distance = e.changedTouches[0].clientX - touchStartX.current;
+    if (distance > 80) navigate('/camera'); 
+    touchStartX.current = null;
+  };
+
+  if (videos.length === 0) return <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '50vh' }}>ריק פה.</div>;
+
+  return (
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ position: 'relative', width: '100vw', height: '100dvh', background: 'var(--bg-main)', overflow: 'hidden' }}>
+      
+      <div style={{ position: 'absolute', top: 30, right: 20, zIndex: 50, pointerEvents: 'auto' }}>
+        <button onClick={markNotifsRead} className="glass-button" style={{ width: 44, height: 44, position: 'relative' }}>
+          <Bell size={20} color="#fff" />
+          {unreadCount > 0 && <div style={{ position: 'absolute', top: 10, right: 12, width: 8, height: 8, background: 'var(--color-danger)', borderRadius: '50%', boxShadow: '0 0 8px var(--color-danger)' }} />}
+        </button>
+      </div>
+      
+      {/* כפתור הפרופיל שמאלה למעלה */}
+      <div style={{ position: 'absolute', top: 30, left: 20, zIndex: 50, pointerEvents: 'auto' }}>
+        <button onClick={() => navigate('/profile')} className="glass-button" style={{ width: 44, height: 44 }}>
+          <User size={20} color="#fff" />
+        </button>
+      </div>
+
+      <div style={{ position: 'absolute', top: 30, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 20, zIndex: 50, pointerEvents: 'auto', direction: 'rtl' }}>
+        <button onClick={() => setFeedType('following')} style={{ background: 'none', border: 'none', cursor: 'pointer', transition: '0.2s', fontSize: 18, fontWeight: 900, color: feedType === 'following' ? '#fff' : '#8e8e93', WebkitTextStroke: feedType === 'following' ? '0px' : '0.5px rgba(255,255,255,0.8)', textShadow: feedType === 'following' ? '0 0 15px rgba(255,255,255,0.8)' : 'none' }}>עוקבים</button>
+        <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }} />
+        <button onClick={() => setFeedType('foryou')} style={{ background: 'none', border: 'none', cursor: 'pointer', transition: '0.2s', fontSize: 18, fontWeight: 900, color: feedType === 'foryou' ? '#fff' : '#8e8e93', WebkitTextStroke: feedType === 'foryou' ? '0px' : '0.5px rgba(255,255,255,0.8)', textShadow: feedType === 'foryou' ? '0 0 15px rgba(255,255,255,0.8)' : 'none' }}>פור יו</button>
+      </div>
+
+      <AnimatePresence>
+        {showNotifs && (
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="glass-panel" style={{ position: 'absolute', top: 80, left: 20, right: 20, maxHeight: '60vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', zIndex: 60, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, direction: 'rtl' }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 8 }}>עדכונים חמים</div>
+            {notifications.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>אין עדכונים בינתיים.</div> : notifications.map(n => (
+              <div key={n.id} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 12, background: n.is_read ? 'rgba(255,255,255,0.05)' : 'rgba(255,69,58,0.1)', borderRadius: 16, border: n.is_read ? 'none' : '1px solid rgba(255,69,58,0.3)' }}>
+                <Zap size={20} color={n.is_read ? 'var(--text-muted)' : 'var(--color-warning)'} />
+                <div style={{ flex: 1, color: '#fff', fontSize: 14, lineHeight: 1.4 }}>{n.message}</div>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div ref={containerRef} onScroll={handleScroll} style={{ height: '100%', width: '100%', overflowY: 'scroll', scrollSnapType: 'y mandatory', direction: 'rtl', paddingBottom: 70, WebkitOverflowScrolling: 'touch' }}>
+        {loopedVideos.map((vid, idx) => (
+          <FeedItem key={vid.uniqueKey} video={vid} isActive={idx === activeIndex} user={user} profile={profile} fetchProfile={fetchProfile} onNavigateTrending={() => navigate('/trending')} onNavigateProfile={(id: string) => navigate(`/u/${id}`)} onNavigateSearch={() => navigate('/search')} />
+        ))}
+      </div>
+    </div>
+  );
+}

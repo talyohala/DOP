@@ -1,0 +1,248 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { X, Loader2, SwitchCamera, Send, Zap, Sparkles, Filter } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+export default function CameraPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const touchStartX = useRef<number | null>(null);
+  
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaBlob, setMediaBlob] = useState<Blob | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [desc, setDesc] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const holdTimeout = useRef<any>(null);
+
+  const [isFlashActive, setIsFlashActive] = useState(false);
+  const [isNeonFilterActive, setIsNeonFilterActive] = useState(false);
+  const [isRapidShotActive, setIsRapidShotActive] = useState(false);
+
+  const startCamera = async (mode: 'user' | 'environment') => {
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    try {
+      const constraints = {
+        video: { facingMode: { ideal: mode } },
+        audio: true
+      };
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      setStream(newStream);
+      if (videoRef.current) videoRef.current.srcObject = newStream;
+    } catch (err: any) {
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        setStream(fallbackStream);
+        if (videoRef.current) videoRef.current.srcObject = fallbackStream;
+      } catch (fallbackErr) {
+        toast.error('שגיאת מצלמה. ודא שהאפליקציה פתוחה ב-HTTPS.');
+      }
+    }
+  };
+
+  useEffect(() => {
+    startCamera(facingMode);
+    return () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
+  }, [facingMode]);
+
+  const takePhoto = async () => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (facingMode === 'user' && isFlashActive) {
+      setIsFlashActive(true);
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    ctx.drawImage(videoRef.current, 0, 0);
+
+    if (isNeonFilterActive) {
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = 'rgba(0, 122, 255, 0.3)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      for (let i = 0; i < 50000; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.width;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        setMediaBlob(blob);
+        setPreviewUrl(URL.createObjectURL(blob));
+        if (stream) stream.getTracks().forEach(track => track.stop());
+        setIsFlashActive(false);
+      }
+    }, 'image/jpeg', 0.9);
+  };
+
+  const takeRapidPhoto = async () => {
+    if (!videoRef.current || !isRapidShotActive) return;
+    toast('צילום מהיר מתחיל...', { icon: '📸' });
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    for (let i = 0; i < 3; i++) {
+      if (facingMode === 'user') setIsFlashActive(true);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      ctx.drawImage(videoRef.current, 0, 0); 
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setIsFlashActive(false);
+    }
+    takePhoto();
+  };
+
+  const startRecording = () => {
+    if (!stream) return;
+    setIsRecording(true);
+    chunksRef.current = [];
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+      setMediaBlob(blob);
+      setPreviewUrl(URL.createObjectURL(blob));
+      if (stream) stream.getTracks().forEach(track => track.stop());
+    };
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handlePointerDown = () => { holdTimeout.current = setTimeout(() => { startRecording(); }, 400); };
+  const handlePointerUp = () => {
+    clearTimeout(holdTimeout.current);
+    if (isRecording) stopRecording();
+    else if (isRapidShotActive) takeRapidPhoto();
+    else takePhoto();
+  };
+
+  const handleUpload = async () => {
+    if (!mediaBlob) return;
+    setIsUploading(true);
+    try {
+      const ext = mediaBlob.type.includes('video') ? 'webm' : 'jpg';
+      const filePath = `${user.id}_${Math.random()}.${ext}`;
+      await supabase.storage.from('dop_drops').upload(filePath, mediaBlob);
+      const { data } = supabase.storage.from('dop_drops').getPublicUrl(filePath);
+      await supabase.from('dop_videos').insert([{ creator_id: user.id, video_url: data.publicUrl, description: desc }]);
+      toast.success('הדרופ שוגר בהצלחה! 🚀');
+      navigate('/');
+    } catch {
+      toast.error('שגיאה בהעלאה');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const distance = touchStartX.current - e.changedTouches[0].clientX;
+    if (distance > 80) navigate('/');
+    touchStartX.current = null;
+  };
+
+  return (
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ height: '100dvh', width: '100vw', background: isFlashActive ? '#fff' : '#000', position: 'relative', overflow: 'hidden', direction: 'rtl', transition: 'background 0.1s linear' }}>
+      
+      {!previewUrl && (
+        <>
+          <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          
+          <div style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}>
+            <button onClick={() => navigate('/')} className="glass-button" style={{ width: 44, height: 44, background: 'rgba(0,0,0,0.3)', border: 'none' }}><X size={20} color="#fff" /></button>
+          </div>
+
+          <div style={{ position: 'absolute', top: 40, left: 20, zIndex: 10 }}>
+            <button onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')} className="glass-button" style={{ width: 44, height: 44, background: 'rgba(0,0,0,0.3)', border: 'none' }}>
+              <SwitchCamera size={20} color="#fff" />
+            </button>
+          </div>
+
+          <div style={{ position: 'absolute', top: 100, left: 20, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {facingMode === 'user' && (
+              <button onClick={() => setIsFlashActive(prev => !prev)} className="glass-button" style={{ width: 44, height: 44, background: isFlashActive ? '#fff' : 'rgba(0,0,0,0.3)', border: 'none' }}>
+                <Zap size={20} color={isFlashActive ? '#000' : '#fff'} />
+              </button>
+            )}
+            <button onClick={() => setIsNeonFilterActive(prev => !prev)} className="glass-button" style={{ width: 44, height: 44, background: isNeonFilterActive ? 'var(--color-primary)' : 'rgba(0,0,0,0.3)', border: 'none', boxShadow: isNeonFilterActive ? '0 0 15px var(--color-primary)' : 'none' }}>
+              <Sparkles size={20} color={isNeonFilterActive ? '#fff' : '#fff'} />
+            </button>
+            <button onClick={() => setIsRapidShotActive(prev => !prev)} className="glass-button" style={{ width: 44, height: 44, background: isRapidShotActive ? 'var(--color-danger)' : 'rgba(0,0,0,0.3)', border: 'none', boxShadow: isRapidShotActive ? '0 0 15px var(--color-danger)' : 'none' }}>
+              <span style={{ fontWeight: 900, fontSize: 14, color: '#fff' }}>3x</span>
+            </button>
+          </div>
+
+          {/* נקודת הזהב: הורדנו ל-85 פיקסלים במקום 110 */}
+          <div style={{ position: 'absolute', bottom: 120, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 10 }}>
+            <motion.div 
+              onPointerDown={handlePointerDown} 
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+              animate={{ scale: isRecording ? 1.2 : 1 }}
+              style={{ width: 80, height: 80, borderRadius: '50%', border: '4px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: isRecording ? 'rgba(255,69,58,0.5)' : 'rgba(255,255,255,0.2)', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
+            >
+              <div style={{ width: 60, height: 60, borderRadius: '50%', background: isRecording ? 'var(--color-danger)' : '#fff' }} />
+            </motion.div>
+          </div>
+        </>
+      )}
+
+      {previewUrl && (
+        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+          {mediaBlob?.type.includes('video') ? <video src={previewUrl} autoPlay loop playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={previewUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Preview" />}
+
+          <div style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}>
+            <button onClick={() => { setPreviewUrl(null); setMediaBlob(null); startCamera(facingMode); }} className="glass-button" style={{ width: 44, height: 44, background: 'rgba(0,0,0,0.5)', border: 'none' }}><X size={20} color="#fff" /></button>
+          </div>
+
+          {/* הורדנו את אזור השיגור ל-55 פיקסלים במקום 80 */}
+          <div style={{ position: 'absolute', bottom: 55, left: 0, right: 0, padding: '0 20px', display: 'flex', alignItems: 'center', gap: 16, zIndex: 10 }}>
+            <input 
+              value={desc} 
+              onChange={e => setDesc(e.target.value)} 
+              placeholder="הוסף תיאור לדרופ..." 
+              className="glass-panel" 
+              style={{ flex: 1, padding: '14px 20px', color: '#fff', fontSize: 16, border: 'none', outline: 'none', borderRadius: 24, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)' }} 
+            />
+            
+            <motion.button 
+              whileTap={{ scale: 0.9 }} 
+              onClick={handleUpload} 
+              disabled={isUploading} 
+              style={{ width: 52, height: 52, borderRadius: '50%', background: '#fff', color: '#000', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 15px rgba(0,0,0,0.5)' }}
+            >
+              {isUploading ? <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={22} style={{ transform: 'translateX(-2px)' }}/>}
+            </motion.button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,113 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { LogOut, Link as LinkIcon, Edit2, Check, Clock, Ticket, Skull, ArrowRight, ChevronLeft } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+export default function Profile() {
+  const { user, profile, signOut, fetchProfile } = useAuth();
+  const navigate = useNavigate();
+  const [bioLink, setBioLink] = useState('');
+  const [isEditingLink, setIsEditingLink] = useState(false);
+  const [videos, setVideos] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (profile?.bio_link) setBioLink(profile.bio_link);
+    if (user) {
+      const fetchMyVideos = async () => {
+        const { data } = await supabase.from('dop_videos').select('*').eq('creator_id', user.id).order('created_at', { ascending: false });
+        if (data) setVideos(data);
+      };
+      fetchMyVideos();
+    }
+  }, [profile, user]);
+
+  const saveLink = async () => {
+    if (!user) return;
+    let finalLink = bioLink.trim();
+    if (finalLink && !finalLink.startsWith('http')) finalLink = `https://${finalLink}`;
+    await supabase.from('dop_users').update({ bio_link: finalLink }).eq('id', user.id);
+    await fetchProfile(user.id);
+    setIsEditingLink(false);
+    toast.success('קישור עודכן!');
+  };
+
+  if (!profile) return <div style={{ background: 'var(--bg-main)', height: '100vh' }} />;
+  const now = new Date().getTime();
+
+  return (
+    <div style={{ direction: 'rtl', height: '100dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '60px 20px 120px', background: 'var(--bg-main)' }}>
+      
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
+        <button onClick={() => navigate('/')} className="glass-button" style={{ width: 44, height: 44 }}><ArrowRight size={20} color="#fff" /></button>
+        <h1 style={{ color: '#fff', fontSize: 24, fontWeight: 900, margin: 0 }}>הפרופיל שלי</h1>
+        <button onClick={() => { signOut(); navigate('/auth'); }} className="glass-button" style={{ width: 44, height: 44, color: 'var(--color-danger)' }}><LogOut size={20} /></button>
+      </div>
+
+      <div style={{ textAlign: 'center', marginBottom: 32 }}>
+        <div style={{ width: 96, height: 96, borderRadius: '50%', background: '#fff', color: '#000', fontSize: 40, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 10px 30px rgba(255,255,255,0.2)' }}>
+          {profile.display_name?.charAt(0)}
+        </div>
+        <div style={{ fontSize: 28, fontWeight: 900, color: '#fff' }}>@{profile.display_name}</div>
+        
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+          {isEditingLink ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'rgba(255,255,255,0.1)', padding: '4px 12px', borderRadius: 24 }}>
+              <input value={bioLink} onChange={e => setBioLink(e.target.value)} placeholder="www.instagram.com/me" style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: 14, textAlign: 'left', direction: 'ltr' }} />
+              <button onClick={saveLink} style={{ background: 'transparent', border: 'none', color: '#fff' }}><Check size={16} /></button>
+            </div>
+          ) : (
+            <div onClick={() => setIsEditingLink(true)} style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--color-primary)', fontSize: 14, cursor: 'pointer', background: 'rgba(0,122,255,0.1)', padding: '6px 16px', borderRadius: 24 }}>
+              <LinkIcon size={14} /> {profile.bio_link ? profile.bio_link.replace('https://', '') : 'הוסף קישור (אינסטגרם/אתר)'} <Edit2 size={12} style={{ marginLeft: 4 }} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* תמלוגים (במקום קופה) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <div className="glass-panel" style={{ padding: 20, borderRadius: 24, textAlign: 'center' }}>
+          <Clock size={28} color="var(--color-warning)" style={{ margin: '0 auto 12px' }} />
+          <div style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 700, marginBottom: 4 }}>זמן מסך</div>
+          <div style={{ color: '#fff', fontSize: 24, fontWeight: 900, fontFamily: 'monospace' }}>{profile.time_balance} דק'</div>
+        </div>
+        <div className="glass-panel" style={{ padding: 20, borderRadius: 24, textAlign: 'center' }}>
+          <Clock size={28} color="var(--color-primary)" style={{ margin: '0 auto 12px' }} />
+          <div style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 700, marginBottom: 4 }}>תמלוגים מבוסטים</div>
+          <div style={{ color: '#fff', fontSize: 24, fontWeight: 900, fontFamily: 'monospace' }}>{Math.floor((profile.time_balance || 0) * 0.1)} דק'</div>
+        </div>
+      </div>
+
+      {/* קישור לקופונים / חנות */}
+      <div onClick={() => navigate('/wallet')} className="glass-panel" style={{ padding: '16px 20px', borderRadius: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40, cursor: 'pointer', background: 'rgba(255,255,255,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,69,58,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Ticket size={20} color="var(--color-danger)" />
+          </div>
+          <div>
+            <div style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>הקופונים שלי</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>המר דקות לפרסים בחנות</div>
+          </div>
+        </div>
+        <ChevronLeft size={20} color="var(--text-muted)" />
+      </div>
+
+      {/* גלריית הדרופים */}
+      <h3 style={{ color: '#fff', fontSize: 18, fontWeight: 800, marginBottom: 16 }}>הדרופים שלי ({videos.length})</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        {videos.map(v => {
+          const isAlive = new Date(v.expires_at).getTime() > now;
+          const isImage = v.video_url?.match(/\.(jpeg|jpg|gif|png|webp)$/i);
+          return (
+            <div key={v.id} style={{ aspectRatio: '3/4', borderRadius: 16, overflow: 'hidden', position: 'relative', filter: isAlive ? 'none' : 'grayscale(1)', border: isAlive ? '1px solid var(--glass-border)' : 'none' }}>
+              {isImage ? <img src={v.video_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" /> : <video src={v.video_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+              {!isAlive && <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Skull size={24} color="#ef4444" opacity={0.8} /></div>}
+            </div>
+          );
+        })}
+      </div>
+
+    </div>
+  );
+}
